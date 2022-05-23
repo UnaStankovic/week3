@@ -93,24 +93,6 @@ type TypedArray =
   | BigInt64Array
   | BigUint64Array;
 
-/**
- * Convert TypedArray object(like data buffer) into bigint
- * @param buf
- * @returns bigint
- */
-const buf2Bigint = (buf: ArrayBuffer | TypedArray | Buffer): bigint => {
-  let bits = 8n;
-  if (ArrayBuffer.isView(buf)) bits = BigInt(buf.BYTES_PER_ELEMENT * 8);
-  else buf = new Uint8Array(buf);
-
-  let ret = 0n;
-  for (const i of (buf as TypedArray | Buffer).values()) {
-    const bi = BigInt(i);
-    ret = (ret << bits) + bi;
-  }
-  return ret;
-};
-
 const buildEddsaModule = async (): Promise<EdDSA> => {
   return buildEddsa();
 };
@@ -228,7 +210,17 @@ const genEcdhSharedKey = async ({
     formatPrivKeyForBabyJub(eddsa, privKey),
   )[0];
 };
+//converting uint8Array to 
+const convertUINT8ArrayToBI = (u8) => {
+  var hex : any = [];
+  u8.forEach(function (i) {
+    var h = i.toString(16);
+    if (h.length % 2) { h = '0' + h; }
+    hex.push(h);
+  });
 
+  return BigInt('0x' + hex.join(''));
+}
 /*
  * Encrypts a plaintext using a given key.
  * @return The ciphertext.
@@ -239,6 +231,18 @@ const encrypt = async (
 ): Promise<Ciphertext> => {
   const mimc7 = await buildMimc7();
   // [assignment] generate the IV, use Mimc7 to hash the shared key with the IV, then encrypt the plain text
+  const ivTmp = mimc7.multiHash(plaintext, BigInt(0))
+  const iv = convertUINT8ArrayToBI(ivTmp);
+  const ciphertext: Ciphertext = {
+      iv,
+      data: plaintext.map((e: bigint, i: number): bigint => {
+          return e +  convertUINT8ArrayToBI(mimc7.hash(
+              sharedKey,
+              iv + BigInt(i)),
+          )
+      }),
+  }
+  return ciphertext
 };
 
 /*
@@ -250,6 +254,15 @@ const decrypt = async (
   sharedKey: EcdhSharedKey,
 ): Promise<Plaintext> => {
   // [assignment] use Mimc7 to hash the shared key with the IV, then descrypt the ciphertext
+  const mimc7 = await buildMimc7();
+
+  const plaintext: Plaintext = ciphertext.data.map(
+        (e: bigint, i: number): bigint => {
+            return e -  convertUINT8ArrayToBI(mimc7.hash(sharedKey, BigInt(ciphertext.iv) + BigInt(i)))
+        }
+    )
+
+    return plaintext
 };
 
 export {
